@@ -1,7 +1,6 @@
 ---
 title: "Behavioral_Analysis"
-author: "Eric Dougherty & Dana Seidel"
-date: "December 5, 2017"
+author: "Eric Dougherty & Dana Seidel, edit/practice by Nicola Love"
 output: html_document
 ---
 
@@ -9,56 +8,79 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Behavioral analysis has become one of the most important new ideas in the movement ecology literature. Due to the importance of the internal state in individual movement decisions, analyses such as the ones we will go through today offer an opportunity to understand the motivations underlying space-use more clearly than most of the broader scale analyses we've seen thus far. We are going to begin by considering Hidden Markov Models (HMM) as a means of exploring the behavioral states of our focal animals. Then, we will explore some methods in behavioral change point analysis (BCPA), before ending with a quick survey of some other novel methods in this space.
+Behavioral analysis has become one of the most important new ideas in the movement ecology literature. Due to the importance of the internal state in individual movement decisions, analyses such as the ones we will go through today offer an opportunity to understand the motivations underlying space-use more clearly than most of the broader scale analyses we've seen thus far. 
+
+We are going to begin by considering Hidden Markov Models (HMM) as a means of exploring the behavioral states of our focal animals. Then, we will explore some methods in behavioral change point analysis (BCPA), before ending with a quick survey of some other novel methods in this space.
 
 # Hidden Markov Models (HMM)
 
+## Elk Data Analysis
 We will begin by loading in a dataset that comes with the moveHMM package, an elk movement track that is analyzed in the Morales et al. 2004 that introduces many of the concepts with which we will be working.
 
 ```{r}
 library(moveHMM)
 head(elk_data)
 ```
+## Elk Data Cleaning
 
-We can see that the data consists of four columns: an ID row (we actually have 4 different elk), and Easting and Northing coordinate, and an auxillary variable of dist_water. Whenever we see "Easting" and "Northing" as opposed to "Longitude" and "Latitude", we know that the coordinates are in UTM (meaning that the units are in meters). For the sake of this analysis, we are actually going to transform these into kilometers, which represents a more reasonable scale when considering steps of this magnitude. Simply dividing each coordinate column by 1000 will do just that:
+"Easting" and "Northing" == the coordinates are in UTM (meaning that the units are in meters). 
 
+transform these into kilometers: 
 ```{r}
 elk_data$Easting <- elk_data$Easting/1000
 elk_data$Northing <- elk_data$Northing/1000
 ```
 
-Notice that this data set is missing the time stamps of these steps. We actually have no idea what the fix rate is for this dataset, meaning that analyses built around a temporal component (like T-LoCoH or Brownian Bridges) could not be performed on these data.
+**Notice** that this data set is missing the time stamps of these steps -> no idea about the fix rate for this dataset so analyses built around a temporal component (like T-LoCoH or Brownian Bridges) can't be performed.
 
-Fortuantely, the spatial data are perfectly usable for a hidden Markov model analysis. Now that we have the correct units (km), we can move on to prepping the data for the moveHMM package. This requires the use of the `moveHMM::prepData` command. We will specify our data, the type of projection (in our case 'UTM', though if our data were latlong coordinates, we could use 'LL'), and the names of the columns representing our coordinates (Easting and Northing):
+This is perfectly usable for a hidden Markov model analysis. Now have the correct units (km) -> prep the data for the moveHMM package. 
+  + This requires the use of the `moveHMM::prepData` command.
+  + We will specify our data, the type of projection (in our case 'UTM', though if our data were latlong coordinates, we could use 'LL'), and the names of the columns representing our coordinates (Easting and Northing):
 
 ```{r}
-data <- prepData(elk_data, type="UTM", coordNames=c("Easting","Northing"))
+data <- prepData(elk_data, type="UTM", coordNames=c("Easting","Northing")) #data, coordinates, coordinate variable names
+head(data)
 ```
 
-Now we have an object (`data`) with 6 variables instead of 4. The two new variables are 'step' (step length, calculated in km) and 'angle' (in radians; i.e., ranging from -pi to pi). Let's take a look at the distributions of these two new variables:
+## Exploratory Summary Plots 
+Now we have an object (`data`) with 6 variables instead of 4. `prepData` calculated two new variables:
+'step' (step length, calculated in km) and 'angle' (in radians; i.e., ranging from -pi to pi). 
 
+Distributions of these two new variables:
 ```{r}
 hist(data$step)
 hist(data$angle)
 ```
 
-Note that these histograms include all four elk. We can also take a look at a summary of our newly created dataset to see the number of observations associated with each elk as well as a distbution of our covariate (distance to water):
+Look at a summary of our newly created dataset to see the number of observations associated with each elk as well as a distbution of our covariate (distance to water):
 
 ```{r}
 summary(data)
 ```
 
-We can also visualize the paths using the plot command. This will give us the path itself and time series plots of the step length and turning angle. This is a good way to check for outliers in the data:
+Visualize the paths using the plot command -> This will give us the path itself and time series plots of the step length and turning angle. This is a good way to check for outliers in the data:
 
 ```{r}
 plot(data[data$ID == "elk-115",])
 ```
+## Fit HMM to Elk Data
 
-Now it is time to fit an HMM to the data. To do this, we will use the `moveHMM::fitHMM` command. This is a pretty complex function, however, that requires quite a few inputs to make it run smoothly. Ultimately, our goal is to build a two-state model that relates the behavioral state to the distance from water covariate.
+Now it is time to fit an HMM to the data using the `moveHMM::fitHMM` command. This is a pretty complex function, however, that requires quite a few inputs to make it run smoothly. 
 
-Our first choice will be to use `nbStates=2` which specifies that we want to fit a two-state model to the data. Then we will offer a formula to guide the calculation of the function regarding transitions between states (`formula=~dist_water`). Next we want to define the distrbutions that we want to use to characterize both the step lengths and turning angles. We are going to use a gamma distribution for the former (`stepDist="gamma"`) and a vonMises distribution for the latter (`angleDist="vm"`). That takes care of that, but we're still not ready to run our function just yet. We want to define some initial values for the state-dependent functions so that the optimization algorithm has a starting point. In this case, the initial parameters should be specified in two vectors, `stepPar0` (for the step distribution) and `anglePar0` (for the angle distribution). The exact parameters for each can be found in the documentation, but for a gamma distribution, we will need a mean, SD, and zero-mass and for the vonMises, we will need a mean and concentration parameter:
+> Ultimately, our goal is to build a two-state model that relates the behavioral state to the distance from water covariate.
+
+  + Use `nbStates=2`- specifies fitting a two-state model to the data. 
+  + Specify a formula for calculating the transitions between states (`formula=~dist_water`). 
+  + Define the distributions for characterizing both the step lengths and turning angles. 
+      + Gamma distribution for step length (`stepDist="gamma"`) and a vonMises distribution for the turning angle (`angleDist="vm"`). 
+  + Define initial values for the state-dependent functions so the optimization algorithm has a starting point.*The algorithm might not find the global optimum of the likelihood function if the initial parameters are poorly chosen*
+      + Initial params should be specified in two vectors: `stepPar0` & `anglePar0`. For a gamma distribution, we will need a mean, SD, and zero-mass. Zero-inflation must be included in the step length distribution if some steps are of length = 0. To do so, another parameter is added to the step distribution: its mass on zero. For the vonMises, we will need a mean and concentration parameter. 
+
+
+*A Note about Numerical Instability, Initial Parameters & Likelihood Optimization from {moveHMM} authors:* the numerical maximization routine might not identify the global maximum of the likelihood function, or even fail to converge altogether, for poorly chosen initial values of the parameters. The best way to deal with such numerical problems is to test different sets of initial values, possibly chosen randomly. By comparing the resulting estimates for the different initial values used, one usually obtains a good feeling for any potential sensitivity of the numerical search to its chosen starting point.
 
 ```{r}
+# Vector of starting parameters 
 mu0 <- c(0.1,1) # step mean (two parameters: one for each state)
 sigma0 <- c(0.1,1) # step SD
 zeromass0 <- c(0.1,0.05) # step zero-mass
@@ -69,66 +91,89 @@ kappa0 <- c(1,1) # angle concentration
 anglePar0 <- c(angleMean0,kappa0)
 ```
 
-The final bit of preparation is to standardize our covariate (i.e., subtract the mean and divide by the standard deviation):
+*A Note about Numerical Instability, Initial Parameters & Likelihood Optimization from {moveHMM} authors (cont.):* The numerical search is highly sensitive to the choice of the initial parameters for the covariate, dist_water. This is due to the high values of the covariate: a small change in the associated regression coefficients can make a big difference in the likelihood function. In such cases, it is advisable to standardize the covariate values before fitting the model. 
 
+Standardization: subtract each data point by the mean and divide by the standard deviation.
 ```{r}
 data$dist_water <- (data$dist_water - mean(data$dist_water)) / sd(data$dist_water)
 ```
 
-Finally, we can put all of these things together in our `moveHMM::fitHMM` command:
+This allows for greater numerical stability, with the con-vergence of the fitting function depending less on the choice of initial values. The value of the maximum log-likelihood is not affected by the standardization of the covariate values, only the maximum likelihood estimate of beta (regression for transition probabilities) is. 
 
+Finally, we can put all of these things together in our `moveHMM::fitHMM` command!
 ```{r}
 m <- fitHMM(data=data, nbStates=2, stepPar0=stepPar0, anglePar0=anglePar0, formula=~dist_water)
 ```
 
-Fortunately, that doesn't take too longe even though there are some pretty intense calcualtions going on in the background. This is primarily because we are fitting relatively few data points (only 735 in total). We can take a look at the resulting model `m`:
+Fortunately, that doesn't take too long even though there are some pretty intense calculations going on in the background. This is primarily because we are fitting relatively few data points (only 735 in total). 
 
 ```{r}
 m
 ```
 
-This output has all sorts of interesting information for us. The first thing we can see is a log-likelihood value. Good to know, but not especially meaningful by itself. Next, we have the step length parameters. The model has explored parameter space for the mean, SD, and zero-mass parameters and returned optimal values of each for both of our (as-yet-unnamed) behavioral states. We can see right off the bat that the mean step size of state 1 is an order of magnitude smaller than that of state 2, so we have some idea about what kind of activities may be occuring in each. We may have something like foraging during state 1 and more directional movement during state 2. The next section defines the turning angle parameter estimates. Next, we can see the regression coefficients for the simple formula we set up to calculate state transition probabilities based on the distance from water. This suggests that an increase in distance from water makes it more likely that an animal that it in state 2 (i.e., moving relatively long distances) will switch to state 1. Conversely, greater distance from water are unlikley to shift an individual from state 1 to state 2.
+This output has all sorts of interesting information for us. 
+1. log-likelihood value: Good to know, but not especially meaningful by itself. 
+2. Step length parameters: the model has explored parameter space for the mean, SD, and zero-mass parameters and returned optimal values of each for both of the behavioral states. We can see right off the bat that the mean step size of state 1 is an order of magnitude smaller than that of state 2, so we have some idea about what kind of activities may be occuring in each. *We may have something like foraging during state 1 and more directional movement during state 2.* 
+3. Turning angle parameter estimates. Same same 
+4. Regression coefficients for`state transition probabilities =~dist_water` : (+) 2 -> 1 suggests increasing distance from water increases likelihood that animal in state 2 (i.e., moving relatively long distances) will switch to state 1. Conversely, greater distance from water are unlikley to shift an individual from state 1 to state 2.
 
-We can also use the `moveHMM::plot` command to visualize all of these things, beginning with the distributions of step lengths and turning angles in the two states, illustrating the transition proababilities between states, and then showing each of the four paths with each point assigned to the most likely state. 
+Use the `moveHMM::plot` to visualize: 
+1. distributions of step lengths and turning angles in the two states
+2. transition probabilities b/w each state & distance to water
+3. movement paths of each elk w/ with each point assigned to the most likely state. 
 
 ```{r}
 plot(m)
 ```
 
-We've officially built our first hidden Markov model! That was pretty exciting. Let's see some ways that we can use the model outputs. The first is to 'decode' the behavioral states along the paths. This was done for us when we plotted each track above, but if we wanted to see the most likley states for each point, we could use the `moveHMM::viterbi` command, which uses the Viterbi algorithm to predict the most likely sequence of states that generated these paths:
+We've officially built our first hidden Markov model! :rocket:
+
+That was pretty exciting. Let's see some ways that we can use the model outputs. The first is to 'decode' the behavioral states along the paths. This was done for us when we plotted each track above, but if we wanted to **see the most likely states for each point**, we could use the `moveHMM::viterbi` command, which uses the **Viterbi algorithm to predict the most likely sequence of states that generated these paths**:
 
 ```{r}
 states <- viterbi(m)
 states
 ```
 
-Thats pretty neat! From this, we can determine the proportion of time that elk spent in one state versus the other:
+That's pretty neat! From this, we can determine *the proportion of time that elk spent in one state* versus the other:
 
 ```{r}
 prop.table(table(states))
+prop.table(table(states))[1]/prop.table(table(states))[2]
 ```
 
-It turns out these animals were in the foraging state nearly three times as frequently as they were in the directional movement state.
+These animals were in the foraging state nearly 3x as frequently as they were in the directional movement state.
 
-If we wanted to get a little bit more information of the probabilities of each animal being in a particular state at a given time, we could use the `moveHMM::stateProbs` command on our model. In this case, rather than extracting one most likely state for each point, the actual probabilities of both states are displayed for each point. The state with highest probability according to `stateProbs` might not be the same as the state in the most probable sequence returned by the Viterbi algorithm. This is because the Viterbi algorithm performs 'global decoding', whereas the state probabilities are 'local decoding'
+For more info on the P(each animal in a particular state at a given time), use the `moveHMM::stateProbs` . This returns a matrix with as many columns as there are states in the model, and as many rows as there are observations (stacking all animals’ observations).
+The elements of the matrix are defined as: stateProbs(m)[t,j] = Pr(S_t = j) where {S_t} is the state process.
+
+Rather than extracting one most likely state for each point, *the actual probabilities of both states are displayed for each point*. The state with highest probability according to `stateProbs` might not be the same as the state in the most probable sequence returned by the Viterbi algorithm. This is because the *Viterbi algorithm performs 'global decoding'*, whereas the **state probabilities are 'local decoding'**
 
 ```{r}
 state.probs <- stateProbs(m)
 head(state.probs)
 ```
-
-We can also visualize these probabiities using `moveHMM::plotStates`, and can specify whether we want to view a specific animal:
+The function `moveHMM::plotStates` can be used to visualize the results of `viterbi` and `stateProbs`, and can specify whether we want to view a specific animal. The following code shows the plots of the most likely state sequence decoded by the Viterbi algorithm, as well as both columns of the matrix of state probabilities, for one individual, “elk-115”. 
 
 ```{r}
-plotStates(m, animals="elk-115")
+plotStates(m, animals="elk-115") # the first plot is the Viterbi algorithm (most likely state)  & the last two plots are the state probabilities - global vs local decoding
 ```
 
-Now you may be wondering why we chose a two-state model rather than a three- or four-state model. Well, there was no great reason, so let's evaluate whether this was a decent decision for us to have made and determine whether we want to move forward with this particular HMM.
+For a transition probability matrix Γ, the stationary distribution is the vector δ that solves the equation δ = δΓ, subject to sum(from i=1 to N) δ_i = 1 .This reflects the long-term proportion of time the model spends in each state.
 
-Here, we'll carry out the same procedure, but initialize and fit a three-state model. Then, we can use the `moveHMM::AIC` command to compare the likelihood values (or more accurately, the information criterion values derived from the liklihoods) and determine which model performed better.
+Is vector δ the eigenvector? Sounds like it....
+
+When the transition probabilities are time-varying (i.e. functions of covariates), the stationary distribution does not exist. However, for fixed values of the covariates, we can obtain one transition probability matrix, and thus one stationary distribution. The function plotStationary does this over a grid of values of each covariate, and plots the resulting stationary state probabilites. They can be interpreted as the long-term probabilities of being in each state at different values of the covariate.
 
 ```{r}
-# initial parameters
+plotStationary(m, plotCI=TRUE)
+```
+## 3 State Model Elk Data
+
+Now you may be wondering why we chose a **2-state model vs  a 3+ state model**. Well, there was no great reason, *so let's evaluate whether this was a decent decision for us to have made and determine whether we want to move forward with this particular HMM*. We can use information criterion selection methods to pick which model best fits the data using `moveHMM::AIC` to compare the likelihood values. 
+
+```{r}
+# initial parameters for 3-state
 mu0 <- c(0.1,0.5,3)
 sigma0 <- c(0.05,0.5,1)
 zeromass0 <- c(0.05,0.0001,0.0001)
@@ -143,29 +188,71 @@ m3 <- fitHMM(data=data, nbStates=3, stepPar0=stepPar3, anglePar0=anglePar3, form
 AIC(m, m3)
 ```
 
-This model took a little longer to run than the two-state model, but it turns out its actually more accurate (lower AIC is better; it indicates that we got additional information that was more beneficial than the additional cost of adding a a few parameters). Now we can take a look at our more accurate model:
+Model Checking: 
 
+The pseudo-residuals (a.k.a. quantile residuals) of the model can be computed with `pseudoRes`. These follow a standard normal distribution if the fitted model is the true data-generating process. In other words, a deviation from normality indicates a lack of fit. 
+
+```{r}
+# compute the pseudo-residuals
+pr <- pseudoRes(m)
+# time series, qq-plots, and ACF of the pseudo-residuals
+plotPR(m)
+```
+
+This model took a little longer to run than the two-state model, but it turns out its actually more accurate 
+
+Plot three-state model:
 ```{r}
 plot(m3)
 ```
 
-One other cool feature of the `moveHMM` package is the ability to plot it on satelite data using the `moveHMM::plotSat` command. In order to do this, we need the coordinates to be in LatLong rather than UTM. Remember, we'll also need to multiply our UTM coordinates by 1000 to make sure the elk are plotted in the right place:
+## Mathematical Notes behind `moveHMM`
 
-```{r}
+*Notes about the moveHMM package from authors:*
+The package is articulated in terms of two S3 classes: moveData and moveHMM. The first extends the native R data frame, essentially gathering time series of the movement metrics of interest, namely the step lengths and turning angles, as well as the covariate values. A moveHMM object is a fitted model, which stores in particular the values of the MLE of the parameters.To create a moveData object, the function `prepData` is called on the tracking data (track points coordinates). Then, the function `fitHMM` is called on the moveData, and returns a moveHMM object. 
+
+*Notes about Model options & distributions:*
+If some steps are exactly equal to zero, then strictly positive distributions such as the gamma are inadequate. In such cases, zero-inflated distributions can be considered. A zero-inflated step length distribution simply assumes that there is a probability z of observing a 0 and a probability of 1 − z of observing a positive value distributed according to a standard positive distribution (e.g. a gamma).
+
+For the gamma distribution, the link between the mean/standard deviation (expected by `fitHMM`) and shape/rate (expected by `dgamma`) is given by:
+shape = mean^2/SD^2, rate = mean /SD^2
+
+*Covariates:*
+It is often of interest to model the state transition probabilities as functions of time-varying covariates. This can be done by assuming the Markov chain to be time-varying, with transition probability matrix Γ^(t) = [γ_ij^(t)],  linking the transition probabilities to the covariate(s) via the multinomial logit link.
+
+![state transition probabilities as functions of time-varying covariates](/Volumes/Data/Tutorials/MovEco-R-Workshop/Materials/transitionprobab.png)
+
+Here {S_t} is the state process, w_lt is the l-th covariate at time t and p is the number of
+covariates considered. The β parameters directly affect the off-diagonal elements in Γ^(t). An increase in the linear predictor η_ij results in an increase in γ_ij^(t) &  also the diagonal entries due to the row constraints (with the entries in each row summing to one).Diagonal entries == same state, right? 
+
+Within `moveHMM`,  the β coefficients for the off-diagonal transition probabilities are stored in an (p + 1) × (N · (N − 1)) matrix. For example, for a 3-state HMM with two covariates, the matrix beta is: 
+![beta matrix](/Volumes/Data/Tutorials/MovEco-R-Workshop/Materials/beta.png)
+Here the first row corresponds to the intercept terms and the other two rows to the slope coefficients associated with the two covariates. In practice, many movement models involve only two states, in which case the above equations boil down to: 
+![two state matrix](/Volumes/Data/Tutorials/MovEco-R-Workshop/Materials/twostate.png)
+
+The inverse logit link function is applied in order to map the real-valued predictor onto the interval [0, 1] (with the above multinomial logit link representing a generalization of this approach to the case of N > 2 states).In the case of two states, the matrix β (covariates) in `moveHMM` is structured as follows:
+![two state beta matrix](/Volumes/Data/Tutorials/MovEco-R-Workshop/Materials/twosbeta.png)
+
+
+One other cool feature of the `moveHMM` package is the ability to plot it on satelite data using the `moveHMM::plotSat` command. In order to do this, we *need the coordinates to be in LatLong rather than UTM* because `Il` only works with longitude and latitude values. Remember, we'll also need to multiply our UTM coordinates by 1000 to make sure the elk are plotted in the right place:
+
+```{r, warnings = FALSE}
 library(rgdal)
-utmcoord <- SpatialPoints(cbind(data$x*1000, data$y*1000), proj4string=CRS("+proj=utm +zone=17"))
+utmcoord <- SpatialPoints(cbind(data$x*1000, data$y*1000), proj4string=CRS("+proj=utm +zone=17")) # In the function SpatialPoints, we indicate +zone=17, because the data come from the UTM zone 17.
 llcoord <- spTransform(utmcoord, CRS("+proj=longlat"))
-lldata <- data.frame(ID=data$ID, x=attr(llcoord, "coords")[,1], y=attr(llcoord, "coords")[,2])
-
+lldata <- data.frame(ID=data$ID, x=attr(llcoord, "coords")[,1], y=attr(llcoord, "coords")[,2]) #contains the converted longitude and latitude coordinates of the observations
+#register_google(key = "")
 #plotSat(lldata, zoom=8)
 ```
-
+## Zebra Data Analysis HMM
 Now lets try to create our own HMM using empirical zebra data collected by the Getz Lab. We know how important time is when it comes to movement data, so rather than using a spatial covariate, let's use a temporal one to see if there is any effect on the transition probabilities.
 
 First, we will bring in the data on Zebra AG253:
 
 ```{r}
 zeb253 <- read.csv('Zebra_AG253.csv')
+head(zeb253)
+summary(zeb253)
 ```
 
 As you can see, we have a lot more observations for this zebra than our elk example. For the sake of time, lets reduce this dataset to a smaller, but still substantial, subset of 500 points:
@@ -174,11 +261,78 @@ As you can see, we have a lot more observations for this zebra than our elk exam
 zebra <- zeb253[10001:10500,]
 ```
 
-Now we have some cleaning to do. We can see that we have LatLong rather than UTM, so we'll need to take care of that. We also need to derive our own temporal covariate using the time stamps.
+## Overview of Coordinate Reference Systems
+
+All information from [Overview of CRS in R written by Melanie Frazer](https://www.nceas.ucsb.edu/sites/default/files/2020-04/OverviewCoordinateReferenceSystems.pdf):
+
+CRS = Coordinate reference systems. Many different CRS are used to describe geographic data.
+The CRS that is chosen depends on when the data was collected, the geographic extent of the data, the purpose of the data, etc. In R, when data with different CRS are combined it is important to transform them to a common CRS so they align with one another. **This is similar to making sure that units are the same when measuring volume or distances. **
+
+`sp` and `rgdal` are used to assign and transform CRS in R. 
+In R, the notation used to describe the CRS is **proj4string** from the PROJ.4 library. It looks like this: +init=epsg: 4121 +proj=longlat +ellps=GRS80 +datum=GGRS87 +no_defs +towgs84=-199.87,74.79,246.62
+
+There are various attributes of the CRS, such as the *projection*, *datum*, and *ellipsoid*. Some of the options for each variable can be obtained in R with projInfo:
+
+1. Projection: projInfo(type = "proj")
+2. Datum: projInfo(type = "datum")
+3. Ellipsoid: projInfo(type = "ellps")
+
+**EPSG codes**
+A particular CRS can be referenced by its EPSG code (i.e.,epsg:4121). The EPSG is a structured dataset of CRS and Coordinate Transformations. It was originally compiled by the, now defunct, European Petroleum Survey Group.
+
+EPSG codes for commonly used CRS (in the U.S.) 
+  +Latitude/Longitude WGS84 (EPSG: 4326). Commonly used by organizations that provide GIS data for the entire globe or many countries. 
+  + CRS used by Google Earth NAD83 (EPSG:4269)
+  + Projected (Easting/Northing) UTM, Zone 10 (EPSG: 32610) Zone 10 is used in the Pacific Northwest
+  + Mercator (EPSG: 3857) Tiles from Google Maps, Open Street Maps, Stamen Maps
+
+In R, the details of a particular EPSG code can be obtained: CRS("+init=epsg:4326"), which returns: +init=epsg:4326 +proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0
+
+![Overview of ellipses, datums & projections pt.1](/Volumes/Data/Tutorials/MovEco-R-Workshop/Materials/ellipses1.png)
+**Ellipses:**
+Determining the shape of the earth is the first step in developing a CRS. An ellipse is a simple model describing the basic shape of the Earth. All mapping and coordinate systems are based on this shape. The Earth is almost spherical, however there is a tiny bulge at the equator that makes it ~0.33% larger than at the poles. 
+
+The ellipsoid is an approximation and does not fit the Earth perfectly. There are different ellipsoids in use, some are designed to fit the whole Earth (WGS84, GRS80) and some are designed to fit a local region (NAD27). Local ellipses can be more accurate for the area they were designed for, but are not useful in other parts of the world. The modern trend is to use a global ellipsoid for compatibility, such as WGS84. The local-best fitting ellipsoid is now considered an old-fashioned concept, but many maps are based on these ellipsoids. 
+
+**Projected vs. Unprojected:**
+There are two general options: 
+(1) *unprojected* (a.k.a. Geographic): Latitude/Longitude for referencing location on the ellipsoid Earth, and
+(2) *projected*: Easting/Northing for referencing location on 2D representations of Earth (the creation of maps)
+
+**Unprojected/Geographic: Lat/Long:**
+Locations on Earth’s 3D spherical surface are referenced using Latitude and Longitude. The Latitude and Longitude coordinates for a particular location will differ depending on the CRS and when the measurement was taken. The 3 most common in U.S.:
+  + WGS84 (EPSG: 4326) +init=epsg:4326+proj=longlat+ellps=WGS84+datum=WGS84+no_defs+towgs84=0,0,0.CRS used by Google Earth and the U.S. Department of Defense for all their mapping. Tends to be used for global reference systems. GPS satellites broadcast the predicted WGS84 orbits.
+  
+  + NAD83 (EPSG:4269) +init=epsg:4269 +proj=longlat +ellps=GRS80 +datum=NAD83 +no_defs +towgs84=0,0,0. Most commonly used by U.S. federal agencies. Aligned with WGS84 at creation, but has since drifted. Although WGS84 and NAD83 are not equivalent, for most applications they are considered equivalent.
+  
+**Projected: Easting/Northing**
+The elliptical Earth can be projected onto a flat surface (i.e., a paper map). Map coordinates of a point are computed from its ellipsoidal latitude and longitude by a standard formula known as a map projection. It is impossible to flatten a round object without distortion, and this results in trade-offs between area, direction, shape, and distance. For example, there is a trade-off between distance and direction because both features can not be simultaneously preserved. There is no "best" projection, but some projections are better suited to different applications.
+  + Mercator preserves direction and is useful for navigation. But distances and areas are distorted, especially near the polar regions. 
+  + Azimuthal Equal Area preserves area, but not direction.
+  
+**Universal Transverse Mercator (UTM)**
+
+The UTM projection is commonly used in research because it tends to be more locally accurate, and furthermore, it has attributes that make the estimating distance easy and accurate. Positions are described using Easting and Northing coordinates.The mercator projection preserves angles and direction, but distorts distance. To minimize this distortion, the UTM divides the Earth into sixty zones, and uses a secant transverse Mercator projection in each zone.
+
+Over time, and depending on location, UTM coordinates have been based on different ellipsoid models. The WGS84 ellipsoid is now often used.
+
+According to Wikipedia: Distortion increases in each UTM zone as the boundaries are approached. However, it is often convenient or necessary to use a single grid when locations are located in two adjacent zones. Ideally, the coordinates of each location should be measured on the grid for the zone in which they are located, but it is possible to overlap measurements into an adjoining zone for some distance when necessary.     
++ For example, standard convention is to use Zone 10 for all of Oregon, even though Oregon is split between zone 10 and 11.
+
+## Zebra Data Cleaning
+
+Now we have some cleaning to do: 
+  + LatLong - > UTM
+  + Derive our own temporal covariate using the time stamps
+
+`SpatialPoints`{{sp}}: creates a "SpatialPoints-class" or "SpatialPointsDataFrame-class" from coordinates & dataframes.
+
+`spTransform` {{sp}}: for map projection and datum transformation. The `spTransform` methods provide transformation between datum(s) and conversion between projections (also known as projection and/or re-projection), from one unambiguously specified coordinate reference system (CRS) to another.
 
 ```{r}
 #Project and transform points into UTM
 coords <- SpatialPoints(zebra[,c("Longitude", "Latitude")], proj4string = CRS("+proj=longlat + datum=WGS84"))
+# zebra[...] is the data, proj4string projects CRS class specified 
 coords <- spTransform(coords, CRS("+proj=utm +south +zone=33 +ellps=WGS84"))
 
 #Create an object that splits apart the date from the time in our DateTime column
@@ -207,12 +361,15 @@ Now we have a nice data frame with 500 observations and 4 columns that looks a l
 head(all.data)
 ```
 
-From here, we'll need to prep the data (i.e., calculate step size and turning angle), make some decisions about the model(s) we want to create and define various initial values to parameterize the model(s). Let's try two alternatives, just like before, one with 2 states and one with 3 states. Note that we are not including a zero-mass parameter here because there are no points with a step distance of 0, and we will get an error for over-parameterizing. In both models, we will use the time of day as a covariate:
+From here, we'll need to prep the data (i.e., calculate step size and turning angle), make some decisions about the model(s) we want to create and define various initial values to parameterize the model(s). Let's try two alternatives, just like before, one with 2 states and one with 3 states. *Note that we are not including a zero-mass parameter here because there are no points with a step distance of 0, and we will get an error for over-parameterizing.* In both models, we will use the time of day as a covariate:
 
 ```{r}
 dataHMM <- prepData(all.data, type="UTM", coordNames=c("Easting","Northing"))
 summary(dataHMM)
 plot(dataHMM,compact=T)
+
+dataHMM %>%
+  count(step == 0) # check that no steps = 0 (Niki's insertion)
 
 mu0 <- c(0.05, 0.5) # step mean (two parameters: one for each state)
 sigma0 <- c(0.05, 0.5) # step SD
@@ -246,7 +403,7 @@ These took a bit longer than the elk example, but now we have two potential HMMs
 AIC(z, z3)
 ```
 
-Well now we know that the three-state model performs better, so lets look at that in a bit more detail. We could also decode the states based on this model, but becasue there are so many points in the time series, it will be a little more difficult to see what is happening. Instead, let's see what kind of proportion of time our zebra spends in each of the behavioral states:
+Well now we know that the three-state model performs better, so lets look at that in a bit more detail. We could also decode the states based on this model, but because there are so many points in the time series, it will be a little more difficult to see what is happening. Instead, let's see what kind of proportion of time our zebra spends in each of the behavioral states:
 
 ```{r}
 z3
@@ -270,13 +427,47 @@ prop.table(table(states.z))
 
 # Behavioral Change Point Analysis (BCPA)
 
-The next method we're going to take a look at is the behavioral change point analysis (BCPA), which looks for the points in a time series during which there are notable shifts. In our case, we will be applying the method to a movement trajectory to see where an animal may transition between behavioral states, but technically change point analyses can be performed on any time series data (e.g., fluctuating stock values over time or carbon dioxide concentration in the atmosphere over time). Once we extract some change points, we can actually compare the results to the projected change points based on the HMM to see how closely they align.
+The next method we're going to take a look at is the behavioral change point analysis (BCPA), which looks for the points in a time series during which there are notable shifts. In our case, we will be applying the method to a movement trajectory to see where an animal may transition between behavioral states, but technically change point analyses can be performed on any time series data (e.g., fluctuating stock values over time or carbon dioxide concentration in the atmosphere over time). 
 
-Just as with all other packages, `bcpa` has its own data format that it prefers, so we will use the `bcpa::MakeTrack` command to translate a set of 100 coordinates (from our 500 point zebra path, for the sake of readability in the outputs) into a usable format:
+Once we extract some change points, we can actually compare the results to the projected change points based on the HMM to see how closely they align.
+
+## Notes about {{bcpa}} from Eliezer Gurarie (the Developer): 
+[bcpa.pdf](https://cran.r-project.org/web/packages/bcpa/vignettes/bcpa.pdf)
+
+The BCPA was developed in order to identify changes in animal behaviors that were obscured by visual inspection or standard techniques. Unique difficulties associated with movement data include multi-dimensionality, auto- and cross-correlation, & in data collection (error-ridden or be irregularly sampled). The irregular sampling is a particulaly vexing problem for marine organism data...
+
+The BCPA uses a likelihood-based method for identifying significant changes in movement parameter values across datasets by sweeping an analysis window over the timeseries and identifying the **most likely changepoints**, while simultaneously **testing which**, if any, of the **parameters** might have changed at that changepoint.
+
+Implementing BCPA has 6 general steps:
+
+1. **Pick a response time-series variable X**. One fairly robust variable is the persistence velocity Vp=V cos(θ) where V is speed = displacement/time interval and θ is turning angle.
+
+2. **Assume Normality** - observations X(t) are observations from a stationary continuous-time Gaussian distribution with mean(µ_i), standard deviation(σ_i) and time-scale of autocorrelation(τ_i), where i ∈ (1, 2, ...N) represents an *a priori* unknown number of behavioral states
+
+*Note: the use of a continuous time scale τ > 0 is a change from the original model, which estimates a discrete autocorrelation 0 < ρ < 1. The time-scale is more biologically meaningful, as it is estimated in units of time: the longer the time-scale the longer the “memory” of the movement.*
+
+3. Obtain Likelihood estimates for µ_i, σ_i & ρ_i within a given stationary state i
+
+4. Find the location within a window of observations that splits a subset of the data into two sets of the 3 parameters ( µ_i, σ_i & ρ_i). 
+
+5. Within this window, use a modified BIC to determine which combo (if any) of the three parameters best describes the separation in the data. Usually, BIC = −2 log(L) + k log(n), where L is the likelihood, k is the number of parameters, and n is the number of data points; however, the 2 is replaced with a constant K > 0. The smaller this value, the more conservative the analysis, i.e. the more likely it is to select a simpler or null model. This is one of several "tuning knobs" in the BCPA (you have control over how conservative you'd like to be)
+
+6. Sweep a window of fixed size across the time series & all the collect the changepoints, the associated models & the values of the estimated parameters according to the selected model on either side of the changepoint within the window. *Note, the window size is another ”knob” - larger windows are more robust but more coarse, smaller windows are more sensitive but more likely to give slightly spurious results, compensated by adjusting the K.*
+
+The output can be presented in two ways: 
+
+1. *Smooth* BCPA: A "smooth" output is the average over all the estimated parameters & the location of all the change points. A smooth output gives the opportunity to have parameters change both suddenly and gradually, and to visualize a phase plot of the behavioral shifts - both sudden and gradual. 
+
+2. *Flat* BCPA: A "flat" output takes the result of each window sweep and finds the most frequently chosen change points, clustering the unique changepoints which are close together (within some interval dTc). The three parameters µ, σ and τ are then estimated within each section, and the location of these “flat” changepoints is recorded. This output is directly comparable to the BPMM segmentation (Bayesian Partitioning Markov Models). 
+
+## Formatting Data for the {{bcpa}} Package
+
+Just as with all other packages, *`bcpa` has its own data format that it prefers*, so we will use the `bcpa::MakeTrack` command to translate a set of 100 coordinates (from our 500 point zebra path, for the sake of readability in the outputs) into a usable format:
 
 ```{r}
 library(bcpa)
-
+# coords comes from earlier using the {sp} package 
+# coords <- SpatialPoints(zebra[,c("Longitude", "Latitude")], proj4string = CRS("+proj=longlat + datum=WGS84")), coords <- spTransform(coords, CRS("+proj=utm +south +zone=33 +ellps=WGS84"))
 X <- as.numeric(coords@coords[1:100,1])
 Y <- as.numeric(coords@coords[1:100,2])
 Time <- 1:100
@@ -286,30 +477,42 @@ plot(mytrack)
 
 To obtain the step length and turning angles, use the `bcpa::GetVT` command, which decomposes the data into single steps and calculates all the statistics:
 
+The VT table contains speeds, steplengths, orientations and other summaries derived from a track. The output of this function is (typically) meant to feed the WindowSweep function.
+Output - a dataframe containing the following columns:
+1. Z.start, Z.end:    the start and end locations (as complex coordinates)
+2. S:                 the step length
+3. Phi & Theta:       absolute angle and turning angle
+4. T.start, T.end:    start and end of time steps (numeric)
+5.T.mid:              temporal midpoint of the step
+6. dT:                duration of the step
+7. V:                 approximate speed (S/dT)
+
 ```{r}
 zebra.VT <- GetVT(mytrack)
 head(zebra.VT)
 ```
 
-The essence of a change point analysis is a sweep across a time series in search of breaks. This sweep can be conducted in a number of ways, but we will focus here on the window sweep, whereby we identify an appropriate `windowsize` and sensitivity (`K`) and then the algorithm searches across the time series in search of break points. One can also input a function as the second argument (it can represent any combination of the elements of our `zebra.VT` dataframe), to serve as a response variable. In this case, we will define a very simple function that account for both the velocity of movement and the direction of movement becasue we dont really have any *a priori* conception of what exactly causes change points in this path.
+The essence of a change point analysis is *a sweep across a time series in search of breaks*. This sweep can be conducted in a number of ways, but we will focus here on the window sweep, whereby we identify an appropriate `windowsize` and sensitivity (`K`) and then the algorithm searches across the time series in search of break points. 
+
+One can also input a function as the second argument (it can represent any combination of the elements of our `zebra.VT` dataframe), to serve as a response variable. In this case, we will define a very simple function that account for both the **velocity of movement and the direction of movement** because we don't really have any *a priori* conception of what exactly causes change points in this path.
 
 ```{r}
 zebra.ws <- WindowSweep(zebra.VT, "V*cos(Theta)", windowsize=50, progress=FALSE, K=2)
 ```
 
-The object that is returned by this function (which takes a little while to run, hence our reduction of the dataset to a smaller length) is a `ws` data frame whose final column indicates proposed break points should be and the parameter values associated with before and after those break point.
+The object that is returned by this function (which takes a little while to run, hence our reduction of the dataset to a smaller length) is a `ws` data frame whose **final column indicates proposed break points should be and the parameter values associated with before and after those break point**.
 
 ```{r}
 head(zebra.ws$ws)
 ```
 
-We can take a look at these suggested breakpoints by looking at the smoothed plot (i.e., the summary in which all the windows are averaged to obtain the “smooth” model). In this plot, the vertical lines represent the significant change points, the width of the lines is proportional to the number of time that change point was selected.
+We can take a look at these suggested breakpoints by looking at the smoothed plot (i.e., the summary in which all the windows are averaged to obtain the “smooth” model). In this plot, the **vertical lines represent the significant change points**, the **width** of the lines is **proportional to the number of time that change point was selected**.
 
 ```{r, warning=FALSE}
 plot(zebra.ws, type="smooth")
 ```
 
-That doesnt offer the clearest picture. We can see that there are about 6 separate change points that have some support. We could, however, add a `threshold` parameter, which indicates how many of the windows that were swept over the data must have selected a particular changepoint for it to be considered significant. Here, we will use 5 and see what it looks like:
+That doesnt offer the clearest picture. We can see that there are about 6 separate change points that have some support. We could, however, add a `threshold` parameter, which indicates **how many of the windows** that were swept over the data must have **selected a particular changepoint for it to be considered significant**. Here, we will use 5 and see what it looks like:
 
 ```{r, warning=FALSE}
 plot(zebra.ws, type="smooth", threshold=5)
@@ -317,7 +520,7 @@ plot(zebra.ws, type="smooth", threshold=5)
 
 This reduces our number of change points from 6 to 4, and all of them appear to signify reasonable shifts in our response variable (which combines velocity and angle).
 
-An alternative way to search for change points is to use the 'flat' rather than 'smooth' method. This analysis first selects changepoints that it deems significant by clustering neighboring change points, and then estimates a homogeneous behavior that occurs between those changepoints.
+An alternative way to search for change points is to use the 'flat' rather than 'smooth' method. This analysis *first selects changepoints that it deems significant by clustering neighboring change points*, and then *estimates a homogeneous behavior that occurs between* those changepoints.
 
 ```{r, warning=FALSE}
 plot(zebra.ws, type="flat")

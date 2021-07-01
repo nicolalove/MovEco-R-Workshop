@@ -1,9 +1,8 @@
 ---
 title: "Exploring Movement Data in R"
 author: "Dana Seidel & Eric Dougherty"
-date: "January 4, 2018"
+notes: "Nicola Love"
 output: github_document
-always_allow_html: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -25,15 +24,10 @@ requiring careful consideration before analysis.
 Here we are going to focus on GPS relocation data as it is one of the most common
 forms of tracking data and provides a (mostly) consistent record of an animals movement path. 
 
-Justr as there are multiple semi-cooperative packages in R for working with spatial
-data generaly, there are many packages in R used to handle movement data, and
+Just as there are multiple semi-cooperative packages in R for working with spatial
+data generally, there are many packages in R used to handle movement data, and
 an ever growing number built for specific analyses. Unfortunately there is no strict
-consensus yet on which class
-movement data objects should be in across packages, and researchers often 
-have to be comfortable converting from one to the other depending on the task at hand and the 
-format required by each package. Although there are most definitely more R packages
-created for dealing with animal movement data, we are going to focus today on the two most
-prominent `move` and `adehabitatLT`.
+consensus yet on which class movement data objects should be in across packages, and researchers often have to be comfortable converting from one to the other depending on the task at hand and the format required by each package. Although there are most definitely more R packages created for dealing with animal movement data, we are going to focus today on the two most prominent `move` and `adehabitatLT`.
 
 To begin we are going to introduce Movebank and `Move` & `MoveStack` objects with the 
 library `move`. Later we will introduce the `adehabitatLT` package and demonstrate
@@ -43,15 +37,8 @@ will form the basis for many more complex movement analyses including our simula
 later next week. 
 
 ## Movebank
-Though often researchers in your position
-will have data of your own, there has been an effort 
-to share movement data from other collections through the Movebank database. Movebank 
-is a free online infrastructure created to help researchers manage, share, analyze, 
-and archive animal movement data. `move` is an R package that contains functions to
-access movement data stored in [movebank.org](http://www.movebank.org) as well
-as tools to visualize and statistically analyze animal movement data. 
-`move` is addressing movement ecology questions that complement existing efforts 
-such as `adeHabitat` and other packages which we will introduce later.
+Though often researchers in your position will have data of your own, there has been an effort 
+to share movement data from other collections through the Movebank database. Movebank is a free online infrastructure created to help researchers manage, share, analyze, and archive animal movement data. `move` is an R package that contains functions to access movement data stored in [movebank.org](http://www.movebank.org) as well as tools to visualize and statistically analyze animal movement data. `move` is addressing movement ecology questions that complement existing efforts such as `adeHabitat` and other packages which we will introduce later.
 
 There are 3 ways to load movement data into R as a `move` object:
 1. Using the movebank API
@@ -84,6 +71,9 @@ write_tsv(albatross, "Study2911040")
 ```
 To save us the effort of getting you all Movebank logins at this point, I have provided
 the tsv. We can use this to demonstrate the 3rd way of loading in movement data.
+
+`move` creates a Move or MoveStack object from a .csv file with location data (from Movebank, ltraj package, telemetry package...own data etc ). When using own data, you must set the projection method with the *proj* argument & specify which columns of your data contain the coordinates and timestamps.
+
 ```{r}
 study <- read_tsv("data_files/Study2911040", comment="##",
                   col_types = "Tnncc")
@@ -103,13 +93,16 @@ class(albatross)
 We've created our own MoveStack. We can plot it using the move::plot command and if we wish, `mapview()` which converts it to a `sf` object on the fly. 
 
 ```{r}
-plot(albatross, type="l") # all of them
+move::plot(albatross, type="l") # all of them
+mapview(albatross) # interactive map
 ```
 
 If we are curious to compare behaviors across individuals, we can split the moveStack, 
 into separte move objects with the command `split`
 ```{r}
 ids <- split(albatross)
+length(unique(ids)) #how many individuals
+length(ids) # checking that above code is doing what I think is happening
 ```
 
 This allows us to plot and manipulate the individuals separately:
@@ -130,24 +123,26 @@ And of course, just as before, we can manipulate, and clean up, this data easily
 ```{r}
 albatross_sf <- 
   study %>% na.omit() %>%
-  st_as_sf(coords = c("location_long", "location_lat"), crs=4326)
+  st_as_sf(coords = c("location_long", "location_lat"), crs=4326) # this is the code for WGS84
 ```
 
 For instance, in this state, it's simple to look at how many records we have per individual:
 ```{r}
 albatross_sf %>% 
   group_by(individual_id) %>% 
-  tally()
+  tally() # look at the bottom of the second R window to see the number of groups
+
 
 # something we could do on the movestack by calling...
 table(albatross@trackId)
+
 ```
 
 Or map the paths of a particular pair:
 ```{r, screenshot.force=TRUE}
 albatross_sf %>% 
   filter(individual_id %in% c(2911059,2911062)) %>% 
-  mapview(zcol="individual_id")
+  mapview(zcol="individual_id") #zcol = color by attribute listed
 ```
 
 and easily convert it back to a `movestack` as needed. 
@@ -156,23 +151,17 @@ as(albatross_sf, 'Spatial') %>% as(., "MoveStack")
 ```
 
 There is lots more the `move` package has to offer but for now, we are going to move
-onto ltraj objects and the primary path characteristics
-they make so easy to extract. We will come back to the `move` package tomorrow 
-when we discuss methods for estimating home ranges. 
+onto ltraj objects and the primary path characteristics they make so easy to extract. We will come back to the `move` package tomorrow when we discuss methods for estimating home ranges. 
 
-## Ltraj objects 
+## Ltraj objects: {adehabitat}
 
-The class ltraj is intended to store trajectories of animals. 
-`ltraj` objects function neatly as lists, similar in some ways 
-to the list of Move objects that was created when we split out albatross MoveStack. 
-A key difference between Move and ltraj objects is not only in the structure of data
-but also the attributes calculated. Ltraj ojects automatically calculate common path
-characteristics like step length, relative turning angle, absolute turning angle, and
-net squared displacement from which much of subsequent movement modelling builds off of. 
-Additionally from these primary path characteristics it's simple to calculate 
-secondary statistics like sinuosity,  residence time, or directional persistence. 
+The class ltraj is intended to store trajectories of animals. `ltraj` objects function neatly as lists, similar in some ways to the list of Move objects that was created when we split out albatross MoveStack. 
 
-`ltrajs` can be created from a traditional data frames, spatial dataframes, or 
+A key difference between Move and ltraj objects is not only in the *structure* of data
+but also the *attributes calculated*. Ltraj objects **automatically calculate common path characteristics** like step length, relative turning angle, absolute turning angle, and
+net squared displacement from which much of subsequent movement modeling builds off of. Additionally from these primary path characteristics it's simple to calculate secondary statistics like sinuosity, residence time, or directional persistence. 
+
+`ltrajs` can be created from a traditional data frames, spatial data frames, or 
 directly from move objects using the command `as.ltraj` and, in the case of the 
 dataframes, specifying the coordinates. 
 
@@ -189,18 +178,11 @@ each "burst" and that this is an "irregular" "Type2" trajectory. Just what exact
 
 ### Side note: types of trajectory
 
-The adehabitat packages, and ltraj objects, distinguish between 2 types of trajectories:
-1. Trajectories of type I are characterized by the fact that the time is not
-precisely known or not taken into account for the relocations of the
-trajectory (i.e. sampling of tracks in snow)
-2. Trajectories of type II are characterized by the fact that the time is
-known for each relocation. This type of trajectory is in turn be divided
-into two subtypes:
-  – regular trajectories: these trajectories are characterized by a constant
-time lag between successive relocations;
-  – irregular trajectories: these trajectories are characterized by a
-variable time lag between successive relocations
-
+The `adehabitat` packages, and `ltraj` objects, distinguish between 2 types of trajectories:
+1. Trajectories of **type I** are characterized by the fact that the **time is not precisely known** or not taken into account for the relocations of the trajectory (i.e. sampling of tracks in snow)
+2. Trajectories of **type II** are characterized by the fact that the **time is known** for each relocation. This type of trajectory is in turn be divided into two subtypes:
+  – *regular* trajectories: these trajectories are characterized by a *constant time lag* between successive relocations;
+  – *irregular* trajectories: these trajectories are characterized by a *variable time lag* between successive relocations
 
 It's worth emphasizing that functions in `adehabitatLT` are mainly designed to deal with
 type I or type II regular trajectories. Irregular trajectories are harder to analyze as their 
@@ -220,9 +202,12 @@ ibex
 ibexraw
 ```
 
-From a simple histogram on the first individual of raw data, we can see there are some big time gaps. 
+From a simple histogram of the individual raw data, we can see there are some big time gaps. 
 ```{r}
 hist(ibexraw[1], "dt", freq = TRUE)
+hist(ibexraw[2], "dt", freq = TRUE)
+hist(ibexraw[3], "dt", freq = TRUE)
+hist(ibexraw[4], "dt", freq = TRUE)
 ```
 
 Looking at this rawibex data, we can see that the median `dt` is:
@@ -230,20 +215,24 @@ Looking at this rawibex data, we can see that the median `dt` is:
 median(ibexraw[[1]]$dt)
 ```
 
-From that we can expect that the unit was set to take a fix every 14400 seconds
-(4 hrs). To regularize a trajectory like this one that is not too irregular -
-we need to round our dt's and insert missing values where needed. Keep in mind, not 
-all trajectories can or should be regularized - we will touch on more advanced methods 
-for dealling with these next week. 
+From that we can expect that the **unit was set to take a fix every 14400 seconds (4 hrs)**. To regularize a trajectory like this one that is not too irregular - *we need to round our dt's and insert missing values where needed*. Keep in mind, not all trajectories can or should be regularized - we will touch on more advanced methods for dealing with these next week. 
 
-In this case, we need to make our first timestamp exact and set the missing
-values accordingly: 
+In this case, we need to make our first time stamp exact and set the missing values accordingly: 
+
+{base}
+`strptime`
+POSIXct: stores date/time values as the number of seconds since January 1, 1970
+POSIXlt: stores date/time values as a list of day, month, year, hour, minute, second
+
+{adehabitatLT}
+`setNA`: This function places missing values in an (approximately) regular trajectory, when a relocation should have been collected, but is actually missing.
+`sett0`: rounds the timing of collection of relocations in an object of class ltraj to obtain a regular trajectory, based on a reference date.
 ```{r}
 ibex153_raw <- ibexraw[1]
-ibex153_raw[[1]]$date <- lubridate::force_tz(ibex153_raw[[1]]$date, "GMT") # hack to simplify timezones. 
+ibex153_raw[[1]]$date <- lubridate::force_tz(ibex153_raw[[1]]$date, "GMT") # hack to simplify timezones. Returns the date-time that has the same clock time as input time, but in the new time zone. 
 
 ## The reference date: the hour should be exact (i.e. minutes=0):
-ref <- strptime("00:00:00", "%H:%M:%S", tz="GMT")
+ref <- strptime("00:00:00", "%H:%M:%S", tz="GMT") #Functions to convert between character representations and objects of classes "POSIXlt" and "POSIXct" representing calendar dates and times. converts to "POSIXlt" and "POSIXct".
 
 ibex153_raw %>% 
   setNA(., ref, 4, units = "hour") %>%  # set the missing values
@@ -253,10 +242,10 @@ is.regular(ibex153)
 
 ```
 
-Now our trajectory is regular and we can trust and compare all those primary path characteristics
-we care about! 
+Now our trajectory is regular and we can trust and compare all those primary path characteristics we care about! :rocket:
 
 # Primary Path Characteristics
+
 If we dig into any one of our ltraj list objects, we'll see a dataframe 
 containing certain basic characteristics from our paths. Specifically: 
 
@@ -270,12 +259,7 @@ hist(ibex[[1]]$dist)
 
 - Turning Angle (`rel.angle` v. `abs.angle`)
 
-Your relative turning angle measures the change of direction between
-the step built by relocations i − 1 and i and the step built by relocations
-i and i + 1 (what we generally refer to as “turning angle”). It is often used together with
-the parameter dist to fit movement models (e.g. Root and Kareiva 1984,
-Marsh and Jones 1988). For comparison the absolute angle is the angle between the x direction and the step
-built by relocations i and i + 1. 
+Your *relative turning angle* measures the **change of direction between the step built by relocations i − 1 and i and the step built by relocations i and i + 1** (what we generally refer to as “turning angle”). It is **often used together with the parameter dist** to fit movement models (e.g. Root and Kareiva 1984, Marsh and Jones 1988). For comparison the *absolute angle* is the angle between the **x direction and the step built by relocations i and i + 1**. 
 
 ```{r}
 ibex[[1]]$abs.angle
@@ -283,8 +267,7 @@ ibex[[1]]$rel.angle
 hist(ibex[[1]]$rel.angle)
 ```
 
-- Net Squared Displacement, i.e R2n,the squared distance between the first relocation of the trajectory
-and the current relocation is often used to test some movements models
+- Net Squared Displacement, i.e R2n, the **squared distance** between the **first relocation** of the trajectory and the **current relocation** is often used to test some movements models
 (e.g. the correlated random walk, see the seminal paper of Kareiva and
 Shigesada, 1983).
 
@@ -294,7 +277,7 @@ hist(ibex[[1]]$R2n)
 ```
 
 Note these distributions plotted above as they often form the basis for accurate simulations
-of animal movemnt paths. 
+of animal movement paths. 
 
 # Some Secondary Characteristics
 From this set of characteristics we can easily pull out secondary path characteristics like: 
@@ -317,13 +300,9 @@ meanfpt(fpt(ibex153, radii = seq(1000, 5000, 1000), units="hours"))
 ```
 
 
-These are just a few of the metrics you might want to derive from your paths. 
-Additional secondary characteristics include *straightness*, *sinuosity*, 
-*directional persistence*,  *persistence velocity*, *residence time*, 
-*time to return*, and more.
-We will encounter many of these on later days of this workshop. 
+These are just a few of the metrics you might want to derive from your paths. Additional secondary characteristics include *straightness*, *sinuosity*, *directional persistence*, *persistence velocity*, *residence time*,  *time to return*, and more. We will encounter many of these on later days of this workshop. 
 
-In addition to the derivation of these primary and secondary path cahracteristics, 
-adehabitatLT is especially useful for path segementation and some simple movement models. 
+In addition to the derivation of these primary and secondary path characteristics, 
+`adehabitatLT` is especially useful for **path segementation** and some simple movement models. 
 We will get more into these analyses at a later date. If interested, I highly recommend
-consulting the packages very thourough documentation. 
+consulting the packages very thorough documentation. 

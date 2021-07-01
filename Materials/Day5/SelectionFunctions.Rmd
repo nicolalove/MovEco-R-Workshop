@@ -1,7 +1,7 @@
 ---
 title: "Day 5 - Prepaing a a basic RSF"
 author: "Dana Seidel & Eric Dougherty"
-date: "January 5, 2018"
+notes: "Nicola Love"
 output: github_document
 ---
 
@@ -24,12 +24,23 @@ For another, more thourough example of building an RSF in R, see the Manual of A
 http://ecosystems.psu.edu/research/labs/walter-lab/manual/chapter-8-resource-selection
 
 ## Step 1: Read in, Clean, and project all your Data
+
+Niki checks out data:
+```{r}
+zebra <- read_csv("data_files/Zebra_Used_LatLong_Full.csv")# just check it out
+View(zebra)
+zebra %>%
+  distinct(ID)%>%
+  tally() # checking how many individuals are present in the 
+```
+
+
 ```{r}
 zebra <- read_csv("data_files/Zebra_Used_LatLong_Full.csv") %>% 
-  dplyr::select(ID = Name, 4:6) %>% 
-  st_as_sf(., coords = 3:4, crs = "+init=epsg:4326") %>% 
-  st_transform("+init=epsg:32733") %>% 
-  mutate(timestamp = lubridate::mdy_hm(Date))
+  dplyr::select(ID = Name, 4:6) %>% #selecting date, lat & long
+  st_as_sf(., coords = 3:4, crs = "+init=epsg:4326") %>%  #creating simple features object from lat&long columns, define crs
+  st_transform("+init=epsg:32733") %>% # convert coordinates to southern hemi/ SA 
+  mutate(timestamp = lubridate::mdy_hm(Date)) # fix dates to month day year - hour min
 
 water <- st_read("data_files/ENP shapefiles/functional water.shp") %>% 
   st_transform("+init=epsg:32733")
@@ -39,14 +50,14 @@ roads <- st_read("data_files/ENP shapefiles/enp roads.shp", crs = "+init=epsg:43
   st_transform("+init=epsg:32733")
 ggplot(roads) + geom_sf()
 
-NDVI <- raster("data_files/NDVI_200903.tif") %>% 
+NDVI <- raster("data_files/NDVI_200903.tif") %>%  
   projectRaster(crs="+proj=utm +zone=33 +south +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0")
 ```
 
 ### Keep in mind temporal effects!
 RSF may be a spatial analysis but if we think selection or availability may 
 change over time, we must control for that in our models, either via appropriate 
-covariate inclusion, or simpky by limiting our scope. 
+covariate inclusion, or simply by limiting our scope. 
 
 ```{r}
 # NDVI was collected in March 2009... perhaps we should limit to only the rainy season months. 
@@ -54,23 +65,22 @@ covariate inclusion, or simpky by limiting our scope.
 
 zebra %>% 
   filter(lubridate::month(timestamp) %in% 1:3) %>% 
-  sf::select.sf(-Date) %>% 
-  mutate(Used = 1) -> zebra
+  dplyr::select(-Date) %>% 
+  mutate(Used = 1) -> zebra #wtf is used? == > ah it's habitat used by animal
 ```
 
 ## Preparing Used v. Available
 ```{r, screenshot.force=TRUE}
 # Choosing an available range. 
 # semiconservative option - 99% UD
-#zebra_ud <- adehabitatHR::kernelUD(as(zebra, "Spatial"), 
-#                                   grid = 450)
+# as(zebra, "Spatial") forces the zebra dataframe to be a spatial data frame - kernelUD takes "SpatialPointsDataFrame"
 zebra_ud <- adehabitatHR::kernelUD(as(zebra, "Spatial")[1],  # add the id column and you get unique homeranges
                                    grid = 450)
 zebra_hr <- adehabitatHR::getverticeshr(zebra_ud, 99)
 
 # let's visualize to see
-homerange <- mapview(zebra_hr)
-homerange
+(homerange <- mapview(zebra_hr))
+
 
 # Note a couple things here: 
 # - the pan: is this really available?
@@ -79,16 +89,16 @@ homerange
 
 # For now we are going to use these to sample available points. 
 # First I need to know how many points to sample in each home range. 
-
+# ultimate goal: want to create matrix of available vs. actually used area, so must build areas not used by animal
+#create availability 
 zebra_ids <- unique(zebra$ID)
 availables <- list()
-for(i in 1:length(zebra_ids)){
-  st_sample(st_as_sf(zebra_hr)[i,], 10*nrow(filter(zebra, ID == zebra_ids[i]))) %>% # sample individual UDs
-  #st_sample(st_as_sf(zebra_hr), 10*nrow(filter(zebra, ID == zebra_ids[i])))  %>%  # 1:10 ratio; population UD
+for(i in 1:length(zebra_ids)){ 
+  st_sample(st_as_sf(zebra_hr)[i,], 10*nrow(filter(zebra, ID == zebra_ids[i]))) %>% # sample individual UDs - 1:10 ratio; population UD
   st_sf(geometry = .) %>%
     mutate(ID = zebra_ids[i], 
           timestamp = NA, 
-          Used = 0) -> availables[[i]] 
+          Used = 0) -> availables[[i]] #habitat not used by animal
 }
 
 availables %>% 
@@ -102,9 +112,9 @@ availables %>%
 head(roads)
 unique(roads$TYPE)
 
-mapview(roads, homerange)
+mapview(list(roads, zebra_hr)) #had to add list(), originally had "homerange" as the second layer but it's is a mapview map itself, can't put a map in as an argument 
 primary_roads <- filter(roads, TYPE %in% c("Tar", "Gravel"))
-mapview(primary_roads, homerange)
+mapview(list(primary_roads, zebra_hr))
 
 # next step take 20 sec or so
 dist<- st_distance(y=zebra_all, x=primary_roads) # a units matrix dim =[nrow(x), nrow(y)]
@@ -134,21 +144,16 @@ From Spatial Ecology
 http://blog.minitab.com/blog/understanding-statistics/handling-multicollinearity-in-regression-analysis
 
 When preparing for a regression analysis we want to ensure that our covariates are not 
-overly correlated. If two variables are highly correlated with one another it makes it hard
-to distinguish their individual effects on the response variable - in this case, the use 
-of a habitat type. 
+overly correlated. If two variables are highly correlated with one another it makes it hard to distinguish their individual effects on the response variable - in this case, the use of a habitat type. 
 
-Thankfully for us, productivity and distance to road and water do not seem to be especially
-correlated in our system:
+Thankfully for us, productivity and distance to road and water do not seem to be especially correlated in our system:
 
 ```{r}
 cor(zebra_full$NDVI, zebra_full$dist_rd)
 cor(zebra_full$NDVI, zebra_full$dist_H2O)
 ```
 
-People debate how to deal with multicollinearity but
-a standard rule of sum is to to drop variables that have a correlation coeffienct
-of over .7. 
+People debate how to deal with multicollinearity but a standard *rule of thumb is to to drop variables that have a correlation coefficient > .7*
 
 ### Population Level - glm
 
@@ -179,13 +184,7 @@ mm
 
 # Predicting from an RSF
 
-Often we want to interpolate a selection surface from our best model. To do this
-you must ensure first that you have complete data layers across you entire 
-area of interest. Since our NDVI layer covers our entire zone we need not recreate 
-that, but for our roads and water variables we need to create layers for
-distance to roads or distance to water across our entire regions. 
-We are going to show you below how to calculate this in the below
-chunk but as this takes a long time to process, we will pull in pre-calculated 
+Often we want to interpolate a selection surface from our best model. To do this you must ensure first that you have complete data layers across you entire area of interest. Since our NDVI layer covers our entire zone we need not recreate that, but for our roads and water variables we need to create layers for distance to roads or distance to water across our entire regions.  We are going to show you below how to calculate this in the below chunk but as this takes a long time to process, we will pull in pre-calculated 
 geotiff in the next chunk for further mapping. 
 
 ```{r, eval=FALSE}
@@ -197,17 +196,24 @@ ENP <- st_read("data_files/ENP shapefiles/enp fence poly.shp") %>%
 # Let's match the resolution of our NDVI layer
 # res(NDVI)
 
-# make a grid and calculate distances
+# st_make_grid creates a square or hexagonal a grid and calculate distances
+# n = number of grid cells in x and y direction (columns, rows)
+# what = character; one of: "polygons", "corners", or "centers"
 enp_grid <- st_make_grid(ENP, n = c(1266, 476), what= "centers") 
 # convert to raster
 dist_raster <- raster(as(enp_grid, "Spatial"), ncol=1266, nrow= 476)
 
 # dist_road_grid <- st_distance(primary_roads, enp_grid)
+# st_distance: Compute Euclidian distance between pairs of geometries -> the area or the length of a set of geometries.
 dist_water_grid <- st_distance(water, enp_grid)
 # dist_raster[] = apply(dist_road_grid, 2, min)
+# apply: apply a function to margins of an array or matrix
+# x = matrix
+# margin = a vector giving the subscripts which the function will be applied over. So for a matrix, 1 = rows, 2 = columns, c(1,2) is rows & columns
+# fun = function to be applied
 dist_raster[] = apply(dist_water_grid, 2, min)
 
-
+#plot two lines together
 plot(dist_raster)
 plot(st_geometry(water), add=TRUE)
 
